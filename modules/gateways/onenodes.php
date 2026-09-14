@@ -79,6 +79,10 @@ function onenodes_link($params)
     $returnUrl   = $systemUrl . 'viewinvoice.php?id=' . $invoiceId . '&onenodes_status=1';
     $callbackUrl = $systemUrl . 'modules/gateways/callback/onenodes.php';
 
+    if(empty($merchantKey)){
+        return 'Merchant key missing';
+    }
+
     $payload = [
         'amount'     => (string) $amount,
         'order_id'   => (string) $invoiceId,
@@ -107,8 +111,8 @@ function onenodes_link($params)
     $response  = curl_exec($ch);
     $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch);
-    curl_close($ch);
 
+    curl_close($ch);
     if ($curlError) {
         return '<div class="alert alert-danger">Payment Gateway Error: ' . htmlspecialchars($curlError, ENT_QUOTES, 'UTF-8') . '</div>';
     }

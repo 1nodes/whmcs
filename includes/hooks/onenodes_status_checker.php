@@ -15,30 +15,39 @@ add_hook('ClientAreaPageViewInvoice', 1, function ($vars) {
         return;
     }
 
-    $invoiceId = (int) ($vars['invoiceid'] ?? ($_GET['id'] ?? 0));
+    $invoiceId = (int)($vars['invoiceid'] ?? ($_GET['id'] ?? 0));
     if ($invoiceId <= 0) {
         return;
     }
 
     // If invoice is already paid, no need to show loading
-    $status = Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status');
-    if (strtolower((string) $status) === 'paid') {
+    $status = Capsule::table('tblinvoices')
+        ->where('id', $invoiceId)
+        ->value('status');
+
+    if (strtolower((string)$status) === 'paid') {
         return;
     }
 
-    $loadingHtml = '
-    <div id="onenodes-loading-overlay">
-        <div class="onenodes-box">
-            <div class="onenodes-spinner"></div>
-            <div class="onenodes-title">Checking and confirming payment...</div>
-            <div class="onenodes-desc">Please wait a few moments, the transaction status is being queried.</div>
-            <button type="button" class="onenodes-btn-dismiss" onclick="document.getElementById(\'onenodes-loading-overlay\').remove();">
-                Close and view invoice
-            </button>
-        </div>
-    </div>
+    $statusCheckUrl = 'modules/gateways/callback/onenodes_check_status.php?invoice_id=' . $invoiceId;
 
-    <style>
+    $loadingHtml = '
+        <div id="onenodes-loading-overlay">
+            <div class="onenodes-box">
+                <div class="onenodes-spinner">
+                
+            </div>
+               
+            <div class="onenodes-title">Checking and confirming payment...</div>
+            
+            <div class="onenodes-desc">Please wait a few moments, the transaction status is being queried.</div>
+                <button type="button" class="onenodes-btn-dismiss" onclick="document.getElementById(\'onenodes-loading-overlay\').remove();">
+                Close and view invoice
+                </button>
+            </div>
+        </div>
+
+        <style>
         #onenodes-loading-overlay {
             position: fixed;
             top: 0;
@@ -101,53 +110,63 @@ add_hook('ClientAreaPageViewInvoice', 1, function ($vars) {
             background: rgba(255, 255, 255, 0.18);
             color: #fff;
         }
+        
         @keyframes onenodes-spin {
             to { transform: rotate(360deg); }
         }
-    </style>
+        </style>
 
-    <script>
-    (function() {
-        // Clean URL parameter without reloading
-        if (window.history && window.history.replaceState) {
-            var url = new URL(window.location.href);
-            url.searchParams.delete("onenodes_status");
-            window.history.replaceState({}, document.title, url.toString());
-        }
+<script>
+(function() {
+if (window.history && window.history.replaceState) {
+var url = new URL(window.location.href);
+url.searchParams.delete("onenodes_status");
+window.history.replaceState({}, document.title, url.toString());
+}
 
-        var maxAttempts = 20;
-        var attempts = 0;
+var maxAttempts = 50;
+var attempts = 0;
+var statusUrl = "' . addslashes($statusCheckUrl) . '";
 
-        function checkInvoiceStatus() {
-            attempts++;
-            if (attempts > maxAttempts) {
-                var overlay = document.getElementById("onenodes-loading-overlay");
-                if (overlay) {
-                    overlay.innerHTML = \'<div class="onenodes-box"><div class="onenodes-title" style="color:#f59e0b;">تأیید شبکه زمان‌بر شد</div><div class="onenodes-desc">پرداخت شما به زودی ثبت خواهد شد. برای بررسی مجدد صفحه را رفرش کنید.</div><button type="button" class="onenodes-btn-dismiss" onclick="location.reload();">بروزرسانی صفحه</button></div>\';
-                }
-                return;
-            }
+function checkInvoiceStatus() {
+attempts++;
 
-            fetch(window.location.href)
-            .then(function(res) { return res.text(); })
-            .then(function(html) {
-                // If invoice turned to Paid in database / HTML
-                if (html.indexOf("paid") !== -1 && (html.indexOf("label-success") !== -1 || html.indexOf("text-success") !== -1 || html.indexOf("badge-success") !== -1 || html.indexOf("پرداخت شده") !== -1 || html.indexOf("Paid") !== -1)) {
-                    window.location.reload();
-                } else {
-                    setTimeout(checkInvoiceStatus, 3000);
-                }
-            })
-            .catch(function() {
-                setTimeout(checkInvoiceStatus, 3000);
-            });
-        }
+if (attempts > maxAttempts) {
+var overlay = document.getElementById("onenodes-loading-overlay");
+if (overlay) {
+overlay.innerHTML = \'<div class="onenodes-box"><div class="onenodes-title" style="color:#f59e0b;">Network confirmation is taking longer than expected</div><div class="onenodes-desc">Your payment will be recorded soon. Please refresh the page to check again.</div><button type="button" class="onenodes-btn-dismiss" onclick="location.reload();">Refresh page</button></div>\';
+}
+return;
+}
 
-        setTimeout(checkInvoiceStatus, 2500);
-    })();
-    </script>
-    ';
+fetch(statusUrl, {
+method: "GET",
+credentials: "same-origin",
+cache: "no-store"
+})
+.then(function(res) {
+if (!res.ok) {
+throw new Error("Status check failed");
+}
+return res.json();
+})
+.then(function(data) {
+if (data && data.success && data.paid === true) {
+window.location.reload();
+return;
+}
 
-    // Inject directly into the viewinvoice page output
+setTimeout(checkInvoiceStatus, 3000);
+})
+.catch(function() {
+setTimeout(checkInvoiceStatus, 3000);
+});
+}
+
+setTimeout(checkInvoiceStatus, 2500);
+})();
+</script>
+';
+
     echo $loadingHtml;
 });

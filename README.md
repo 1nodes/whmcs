@@ -31,7 +31,7 @@ Cryptocurrency payment gateway for WHMCS powered by 1nodes.
    ```
 
 3. Make sure the final structure is:
-
+   
    ```text
    WHMCS/
    ├── modules/
@@ -39,6 +39,7 @@ Cryptocurrency payment gateway for WHMCS powered by 1nodes.
    │       ├── onenodes.php
    │       └── callback/
    │           └── onenodes.php
+   |           └── onenodes_check_status.php
    │
    └── includes/
        └── hooks/

@@ -150,7 +150,6 @@ if ( ! hash_equals($expectedSignature, $signature) ) {
         $gatewayParams['name'],
         [
             'received_signature' => $signature,
-            'expected_signature' => $expectedSignature,
             'payload'            => $rawInput,
         ],
         'Invalid Webhook Signature'
@@ -252,6 +251,14 @@ try {
 
 } catch (\Throwable $exception) {
 
+    $fresh = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
+    if ($fresh && strtolower((string)$fresh->status) === 'paid') {
+        onenodes_json_reply([
+            'status'  => 'success',
+            'message' => 'Already processed',
+        ], 200);
+    }
+
     logTransaction(
         $gatewayParams['name'],
         [
@@ -333,21 +340,20 @@ checkCbTransID($transactionId);
 |--------------------------------------------------------------------------
 */
 
-$whmcsAmount = number_format((float) $invoice->balance, 8, '.', '');
+$amount = (float) $invoice->balance;
 
-
-if ($whmcsAmount <= 0) {
-    $whmcsAmount = number_format((float) $invoice->total, 8, '.', '');
+if ($amount <= 0) {
+    $amount = (float) $invoice->total;
 }
 
-if ($whmcsAmount <= 0) {
-
+if ($amount <= 0) {
     onenodes_json_reply([
         'status'  => 'error',
         'message' => 'Invalid invoice amount',
     ], 400);
 }
 
+$whmcsAmount = number_format($amount, 8, '.', '');
 
 /*
 |--------------------------------------------------------------------------
@@ -383,46 +389,87 @@ logTransaction(
 */
 
 
+try {
+    addInvoicePayment(
+        $invoiceId,
+        $transactionId,
+        $whmcsAmount,
+        0.00,
+        $gatewayModuleName
+    );
+} catch (\Throwable $exception) {
+    logTransaction(
+        $gatewayParams['name'],
+        [
+            'invoice_id'     => $invoiceId,
+            'transaction_id' => $transactionId,
+            'error'          => $exception->getMessage(),
+            'payload'        => $data,
+        ],
+        'Payment registration failed'
+    );
 
-addInvoicePayment(
-    $invoiceId,
-    $transactionId,
-    $whmcsAmount,
-    0.00,
-    $gatewayModuleName
-);
+    onenodes_json_reply([
+        'status'  => 'error',
+        'message' => 'Payment registration failed',
+    ], 500);
+}
 
 
-$txIds = !empty($data['tx_ids']) && is_array($data['tx_ids'])
-    ? implode(', ', array_map('strval', $data['tx_ids']))
-    : '';
+try {
 
-$invoiceNote = sprintf(
-    "1nodes Payment\nPayment ID: %s\nAsset: %s\nAmount Paid: %s\nTransaction ID(s): %s",
-    $data['payment_id'] ?? '',
-    $data['asset'] ?? '',
-    $data['total_paid'] ?? '',
-    $txIds
-);
+    $txIds = !empty($data['tx_ids']) && is_array($data['tx_ids'])
+        ? implode(', ', array_map('strval', $data['tx_ids']))
+        : '';
 
 
+    $invoiceNote = sprintf(
+        "1nodes Payment\nPayment ID: %s\nAsset: %s\nAmount Paid: %s\nTransaction ID(s): %s",
+        $data['payment_id'] ?? '',
+        $data['asset'] ?? '',
+        $data['total_paid'] ?? '',
+        $txIds
+    );
 
-Capsule::table('tblinvoices')
-    ->where('id', $invoiceId)
-    ->update([
-        'notes' => $invoiceNote,
-    ]);
 
-Capsule::table('tblaccounts')
-    ->where('invoiceid', $invoiceId)
-    ->where('transid', $transactionId)
-    ->update([
-        'description' => sprintf(
-            '1nodes Crypto (%s) | TxIDs: %s',
-            $data['asset'] ?? 'CRYPTO',
-            $txIds
-        ),
-    ]);
+
+    $existingNotes = trim((string) ($invoice->notes ?? ''));
+
+    $newNotes = $existingNotes !== ''
+        ? ($existingNotes . "\n\n" . $invoiceNote)
+        : $invoiceNote;
+
+    Capsule::table('tblinvoices')
+        ->where('id', $invoiceId)
+        ->update([
+            'notes' => $newNotes,
+        ]);
+
+    Capsule::table('tblaccounts')
+        ->where('invoiceid', $invoiceId)
+        ->where('transid', $transactionId)
+        ->update([
+            'description' => sprintf(
+                '1nodes Crypto (%s) | TxIDs: %s',
+                $data['asset'] ?? 'CRYPTO',
+                $txIds
+            ),
+        ]);
+
+
+} catch (\Throwable $exception) {
+    logTransaction(
+        $gatewayParams['name'],
+        [
+            'invoice_id'     => $invoiceId,
+            'transaction_id' => $transactionId,
+            'error'          => $exception->getMessage(),
+        ],
+        'Payment registered but metadata update failed'
+    );
+}
+
+
 
 
 /*
