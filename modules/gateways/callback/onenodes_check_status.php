@@ -5,6 +5,7 @@ use WHMCS\Database\Capsule;
 require_once __DIR__ . '/../../../init.php';
 
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, private');
 
 $invoiceId = isset($_GET['invoice_id']) ? (int) $_GET['invoice_id'] : 0;
 
@@ -18,9 +19,24 @@ if ($invoiceId <= 0) {
 }
 
 try {
+    $currentUser = new \WHMCS\Authentication\CurrentUser;
+    $client = $currentUser->client();
+
+    if (!$currentUser->isAuthenticatedUser() || !$client) {
+        http_response_code(401);
+
+        echo json_encode([
+            'success' => false,
+            'message' => 'Authentication required',
+        ]);
+
+        exit;
+    }
+
     $invoice = Capsule::table('tblinvoices')
         ->select('id', 'status')
         ->where('id', $invoiceId)
+        ->where('userid', (int) $client->id)
         ->first();
 
     if (!$invoice) {

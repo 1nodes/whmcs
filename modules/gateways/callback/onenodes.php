@@ -247,23 +247,31 @@ checkCbInvoiceID( $invoiceId, $gatewayParams['name'] );
 
 try {
 
-    $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
+    $invoice = \WHMCS\Billing\Invoice::find($invoiceId);
 
-} catch (\Throwable $exception) {
+    $invoiceBalance = $invoice
+        ? (float) $invoice->balance
+        : null;
 
-    $fresh = Capsule::table('tblinvoices')->where('id', $invoiceId)->first();
-    if ($fresh && strtolower((string)$fresh->status) === 'paid') {
+    if (
+        $invoiceBalance === null
+        || !is_finite($invoiceBalance)
+        || $invoiceBalance <= 0
+    ) {
         onenodes_json_reply([
             'status'  => 'success',
-            'message' => 'Already processed',
+            'message' => 'Invoice has no payable balance',
         ], 200);
     }
+
+} catch (\Throwable $exception) {
 
     logTransaction(
         $gatewayParams['name'],
         [
-            'error'   => $exception->getMessage(),
-            'payload' => $data,
+            'invoice_id' => $invoiceId,
+            'error'      => $exception->getMessage(),
+            'payload'    => $data,
         ],
         'Invoice lookup failed'
     );
@@ -338,22 +346,64 @@ checkCbTransID($transactionId);
 |--------------------------------------------------------------------------
 | WHMCS Amount
 |--------------------------------------------------------------------------
+|
+| 1nodes sends a webhook only after the payment is fully paid.
+| Therefore fiat_amount represents the amount of this 1nodes payment.
+|
 */
+$paymentAmount = $data['fiat_amount'] ?? null;
 
-$amount = (float) $invoice->balance;
-
-if ($amount <= 0) {
-    $amount = (float) $invoice->total;
-}
-
-if ($amount <= 0) {
+if (
+    $paymentAmount === null
+    || !is_numeric($paymentAmount)
+    || !is_finite((float) $paymentAmount)
+    || (float) $paymentAmount <= 0
+) {
     onenodes_json_reply([
         'status'  => 'error',
-        'message' => 'Invalid invoice amount',
+        'message' => 'Invalid payment amount',
     ], 400);
 }
 
-$whmcsAmount = number_format($amount, 8, '.', '');
+$paymentAmount = (float) $paymentAmount;
+
+if (
+    $invoiceBalance === null
+    || !is_finite($invoiceBalance)
+    || $invoiceBalance <= 0
+) {
+    onenodes_json_reply([
+        'status'  => 'error',
+        'message' => 'Invoice has no payable balance',
+    ], 409);
+}
+
+if ($paymentAmount > $invoiceBalance) {
+
+    logTransaction(
+        $gatewayParams['name'],
+        [
+            'invoice_id'      => $invoiceId,
+            'transaction_id'  => $transactionId,
+            'fiat_amount'     => $paymentAmount,
+            'invoice_balance' => $invoiceBalance,
+            'payload'         => $data,
+        ],
+        'Payment amount exceeds invoice balance'
+    );
+
+    onenodes_json_reply([
+        'status'  => 'error',
+        'message' => 'Payment amount exceeds invoice balance',
+    ], 409);
+}
+
+$whmcsAmount = number_format(
+    $paymentAmount,
+    8,
+    '.',
+    ''
+);
 
 /*
 |--------------------------------------------------------------------------
@@ -377,6 +427,8 @@ logTransaction(
         'payment_state'     => $data['payment_state'] ?? '',
         'tx_ids'            => $data['tx_ids'] ?? [],
         'whmcs_amount'      => $whmcsAmount,
+        'fiat_amount'       => $data['fiat_amount'] ?? '',
+        'whmcs_invoice_balance' => $invoiceBalance,
     ],
     'Webhook Received'
 );

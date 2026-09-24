@@ -64,12 +64,31 @@ function onenodes_link($params)
 
     $sessionKey = 'onenodes_pay_url_' . $invoiceId;
 
-    if (!empty($_SESSION[$sessionKey]['url']) && (time() - $_SESSION[$sessionKey]['time']) < 1800) {
+    $paymentContext = hash('sha256', serialize([
+        'invoice_id' => (int) $invoiceId,
+        'amount' => (string) $params['amount'],
+        'currency' => (string) ($params['currency'] ?? ''),
+        'client_id' => (int) ($params['clientdetails']['userid'] ?? 0),
+        'merchant_key' => (string) ($params['merchant_key'] ?? ''),
+    ]));
+
+    $cachedPayment = $_SESSION[$sessionKey] ?? null;
+
+    if (
+        is_array($cachedPayment)
+        && !empty($cachedPayment['url'])
+        && isset($cachedPayment['time'], $cachedPayment['context'])
+        && is_numeric($cachedPayment['time'])
+        && (int) $cachedPayment['time'] <= time()
+        && time() - (int) $cachedPayment['time'] < 1800
+        && hash_equals($cachedPayment['context'], $paymentContext)
+    ) {
         $paymentUrl = $_SESSION[$sessionKey]['url'];
         return '<form method="get" action="' . htmlspecialchars($paymentUrl, ENT_QUOTES, 'UTF-8') . '">'
             . '<input type="submit" value="' . htmlspecialchars($params['langpaynow'] ?? 'Pay Now', ENT_QUOTES, 'UTF-8') . '" class="btn btn-success btn-block" />'
             . '</form>';
     }
+
 
     $merchantKey = $params['merchant_key'] ?? '';
     $apiUrl      = 'https://1nodes.com/wp-json/v1/api/create-payment';
@@ -128,6 +147,7 @@ function onenodes_link($params)
         $_SESSION[$sessionKey] = [
             'url'  => $paymentUrl,
             'time' => time(),
+            'context' => $paymentContext,
         ];
 
         return '<form method="get" action="' . htmlspecialchars($paymentUrl, ENT_QUOTES, 'UTF-8') . '">'
