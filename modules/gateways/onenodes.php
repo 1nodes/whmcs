@@ -80,7 +80,7 @@ function onenodes_link($params)
         && isset($cachedPayment['time'], $cachedPayment['context'])
         && is_numeric($cachedPayment['time'])
         && (int) $cachedPayment['time'] <= time()
-        && time() - (int) $cachedPayment['time'] < 1800
+        && time() - (int) $cachedPayment['time'] < 5
         && hash_equals($cachedPayment['context'], $paymentContext)
     ) {
         $paymentUrl = $_SESSION[$sessionKey]['url'];
@@ -91,7 +91,7 @@ function onenodes_link($params)
 
 
     $merchantKey = $params['merchant_key'] ?? '';
-    $apiUrl      = 'https://1nodes.com/wp-json/v1/api/create-payment';
+    $apiUrl      = 'https://1nodes.app/wp-json/v1/api/create-payment';
     $amount      = $params['amount'];
     $systemUrl   = rtrim($params['systemurl'], '/') . '/';
 
@@ -123,7 +123,7 @@ function onenodes_link($params)
         CURLOPT_TIMEOUT        => 30,
         CURLOPT_CONNECTTIMEOUT => 10,
 
-        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => 2,
     ]);
 
